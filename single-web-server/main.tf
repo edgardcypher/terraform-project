@@ -30,7 +30,7 @@ Packer to create a custom AMI that has the web server installed on it. But again
 we’re going to run the script above as part of the EC2 Instance’s User Data, which AWS will execute when the instance is booting:
 **/
 resource "aws_instance" "example" {
-    ami ="ami-0c55b159cbfafe1f0"
+    ami ="ami-00b5f36c82b5eb314"
     instance_type = "t2.micro"
     vpc_security_group_ids = [aws_security_group.sec-group-instance.id]
 
