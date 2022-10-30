@@ -1,17 +1,46 @@
+# below we configure Terraform to store the state in a s3 bucket (with encryption and locking)
+terraform {
+    backend "s3" {
+        # The name of the S3 bucket to use
+        bucket = "edgard-terraform-state"
+        #The file path within the S3 bucket where the Terraform state file should be written
+        key = "workspaces-cluster-webservers/terraform.tfstate"
+        # The AWS region where the S3 bucket lives
+        region = "us-east-2"
+
+        # The DynamoDB table to use for locking
+        dynamodb_table = "terraform-up-and-running-locks"
+        /*Setting this to true ensures your Terraform state will be encrypted on disk when stored in S3.
+         We already enabled default encryption in the S3 bucket itself, so this is here as a second layer 
+         to ensure that the data is always encrypted*/
+        encrypt = true
+    }
+}
+
 # this file is used to declare or configure a new provider
 # here the provider is AWS but it could be AZURE or google cloud
-
 provider "aws" {
     #infra will be deploy in the us-east-2 region
     region = "us-east-2"
 }
 # ---------------------------------------------------------------------------------------------------------------------
 # GET THE LIST OF AVAILABILITY ZONES IN THE CURRENT REGION
-# Every AWS accout has slightly different availability zones in each region. For example, one account might have
+# Every AWS account has slightly different availability zones in each region. For example, one account might have
 # us-east-1a, us-east-1b, and us-east-1c, while another will have us-east-1a, us-east-1b, and us-east-1d. This resource
 # queries AWS to fetch the list for the current account and region.
 # ---------------------------------------------------------------------------------------------------------------------
 data "aws_availability_zones" "all_AZ" {}
+
+# below we declare terraform data source to read the state file of mysql rds from the s3 bucket. doing this 
+# we can pull in all mysql database's state data to be used anywhere in the config file  
+data "terraform_remote_state" "db" {
+    backend = "s3"
+    config = {
+        bucket  = "edgard-terraform-state"
+        key     = "state/data-stores/mysql/terraform.tfstate"
+        region  = "us-east-2"
+    }
+}
 
 # To create a create the declaration is
 // resource "<PROVIDER>_<TYPE>" "<NAME>" {
@@ -70,21 +99,22 @@ resource "aws_security_group" "sec-group-instance" {
 }
 
 # below we will be creating a launch configuration resource that will be
-# used by a auto scaling group to scale cluster. The lauch configuration will configure
-# EC2 that will be used by cluster. The lifecycle in the setting bellow tells us that 
-# before adding a creating ec2 to cluster we need to delete the old one.
+# used by a auto scaling group to scale cluster. The launch configuration will configure
+# EC2 that will be used by cluster. The lifecycle in the setting below tells us that 
+# we need to create a new ec2 instance before delete old one.
 
 resource "aws_launch_configuration" "launch_conf_ec2" {
     image_id ="ami-0c6de836734de3280"
-    instance_type = "t2.micro"
+    instance_type = "t2.small"
     security_groups = [aws_security_group.sec-group-instance.id]
 
-    user_data = <<-EOF
-                #!/bin/bash
-                echo "Hello, World" > index.html
-                nohup busybox httpd -f -p "${var.server_port}" &
-                EOF
+    user_data = templatefile("user-data.sh",{
+        server_port = var.server_port
+        db_address  = data.terraform_remote_state.db.outputs.address
+        db_port     = data.terraform_remote_state.db.outputs.port
+    })
 
+    # Required when using a launch configuration with an ASG.
     lifecycle {
     create_before_destroy = true
   }
@@ -92,7 +122,7 @@ resource "aws_launch_configuration" "launch_conf_ec2" {
 
 # below we wil create an auto scaling group that will use the launch configuration
 # above.This ASG will run between 2 and 10 EC2 instances but 2 will be default in the inital launch.
-# ech instance will be tagged with the name "terraform-asg-example". we add availability_zones parameter to
+# each instance will be tagged with the name "terraform-asg-example". we add availability_zones parameter to
 #specifies into which AZ the EC2 instances should be deployed
 
 resource "aws_autoscaling_group" "example_autoscaling" {
@@ -102,7 +132,7 @@ resource "aws_autoscaling_group" "example_autoscaling" {
   min_size = 2
   max_size = 10
 
-  # below we tell ASG to register each instance in the LB and also add health check type to ELB instead of EC2
+  # below we tell ASG to register each instance in the LB and also add health check type to be ELB instead of EC2
   # and it will tell ASG to use the health check defined the LB to determine if an instance is healthy or not and auto replace
   # instances if the CLB reports them as unhealthy, so instances will be replaced not only if they are completely down but also for 
   # example if the stopped serving request because they ran out of memory or critical process crashed 
@@ -117,7 +147,7 @@ resource "aws_autoscaling_group" "example_autoscaling" {
 }
 
 # below we will create a load balancer that will distribute traffic accross our ec2 server 
-# and also give client users a single Ip address where the request will be sent. the IP address will
+# and also give client users a single Ip address where the request will be sent. the IP address will be
 # the address of the load balancer server. AWS handles automatically the scalability and availability of ELB
 # in different AZ based on the traffics and also failover.
 
@@ -129,7 +159,7 @@ resource "aws_elb" "classic_elb" {
     # below we add a health check to periodically check the health of
     # the EC2, if an ec2 is unhealthy the lb balancer will periodically stop
     # routing the traffic to it. below we add a LB health check where LB will send an HTTP
-    #request every 30s to "/" URL of each ec2. LB will mark the ec2 as healthy if it responds with 200 OK.
+    #request every 30s to "/" URL of each ec2. LB will mark the ec2 as healthy if it responds with 200 OK twice and unhealthy otherwise.
     health_check {
         target                  = "HTTP:${var.server_port}/"
         interval                = 30
