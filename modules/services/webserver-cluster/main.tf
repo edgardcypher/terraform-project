@@ -19,10 +19,11 @@ terraform {
 
 # this file is used to declare or configure a new provider
 # here the provider is AWS but it could be AZURE or google cloud
-provider "aws" {
-    #infra will be deploy in the us-east-2 region
-    region = "us-east-2"
-}
+# we comment the provider because it needs to be declared at the root module
+# provider "aws" {
+#     #infra will be deploy in the us-east-2 region
+#     region = "us-east-2"
+# }
 # ---------------------------------------------------------------------------------------------------------------------
 # GET THE LIST OF AVAILABILITY ZONES IN THE CURRENT REGION
 # Every AWS account has slightly different availability zones in each region. For example, one account might have
@@ -152,7 +153,7 @@ resource "aws_autoscaling_group" "example_autoscaling" {
 # in different AZ based on the traffics and also failover.
 
 resource "aws_elb" "classic_elb" {
-    name = "classic-ELB"
+    name = "${var.cluster_name}-ELB"
     availability_zones      = data.aws_availability_zones.all_AZ.names
     security_groups         = [aws_security_group.sec_group_elb.id]
     
