@@ -23,7 +23,7 @@ terraform {
 
 # the reusable module is called.
 module "webserver_cluster" {
-    source = "../../../modules/services/webserver-cluster"
+    source = "https://github.com/edgardcypher/terraform_modules//services/webserver-cluster?ref=v0.0.1"
 
     # below we set value of variables that are used in the module
     cluster_name = "webservers-stage"
