@@ -4,7 +4,7 @@ provider "aws" {
 
 # the reusable module is called.
 module "prod_webserver_cluster" {
-    source = "../../../modules/services/webserver-cluster"
+    source = "github.com/edgardcypher/terraform_modules//services/webserver-cluster?ref=v0.0.2"
 
     # below we set value of variables that are used in the module
     cluster_name = "webservers-prod"
